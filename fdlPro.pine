@@ -1,0 +1,141 @@
+//@version=5
+indicator("FDL pro", overlay=true)
+
+// Inputs for plotting EMAs (checkbox)
+point_distance_option = input.string("Us30", title="Select Symbol for Entry Distance", options=["Us30", "NQ", "SPX"])
+
+// Set Entry Distance based on dropdown selection
+var float point_distance = na
+
+if point_distance_option == "Us30"
+    point_distance := 20
+else if point_distance_option == "NQ"
+    point_distance := 3
+else if point_distance_option == "SPX"
+    point_distance := 2.5
+
+
+open_candle = 2 //input.int(2, title = 'Open Candles', minval = 1)
+plot_emas = input.bool(true, title = 'Plot EMAs')
+use_timefilter = input.bool(true, title="Only show setups between", inline="time")
+// EMA 
+ema100 = ta.ema(close, 100) 
+ema200 = ta.ema(close, 200)
+ 
+// Create buy and sell crossover conditions
+buy_cross = ema100 > ema200
+sell_cross = ema100 < ema200
+
+
+// Time filter with session input
+
+sesb_ses = input.session('0630-1130', "", inline="time")
+
+// Session Filter
+t = time(timeframe.period, sesb_ses, "America/New_York")
+is_in_time_range = use_timefilter ? t : true
+
+//____________________________________________________________cross______________________________________________________//
+// Variables to track the first and second candles after the buy crossover
+var int buy_cross_bar_index = na
+var bool first_candle_after_buy_cross = false
+var bool second_candle_after_buy_cross = false
+
+// Variables to track the first and second candles after the sell crossover
+var int sell_cross_bar_index = na
+var bool first_candle_after_sell_cross = false
+var bool second_candle_after_sell_cross = false
+
+// Check if the buy crossover has occurred and track the first two candles after it
+if buy_cross and na(buy_cross_bar_index)
+    buy_cross_bar_index := bar_index
+    first_candle_after_buy_cross := open > ema100
+
+if not na(buy_cross_bar_index) and bar_index > buy_cross_bar_index
+    if first_candle_after_buy_cross and not second_candle_after_buy_cross
+        second_candle_after_buy_cross := open > ema100
+
+// Check if the sell crossover has occurred and track the first two candles after it
+if sell_cross and na(sell_cross_bar_index)
+    sell_cross_bar_index := bar_index
+    first_candle_after_sell_cross := open < ema100
+
+if not na(sell_cross_bar_index) and bar_index > sell_cross_bar_index
+    if first_candle_after_sell_cross and not second_candle_after_sell_cross
+        second_candle_after_sell_cross := open < ema100
+
+// Buy and Sell condition
+buy_condition = buy_cross and first_candle_after_buy_cross and second_candle_after_buy_cross and low - ema100 < point_distance
+sell_condition = sell_cross and first_candle_after_sell_cross and second_candle_after_sell_cross and ema100 - high < point_distance
+
+// Track buy and sell signals
+var bool buy_signal_printed = false
+var bool sell_signal_printed = false
+
+// Create boolean series for shapes
+buy_signal = buy_condition and not buy_signal_printed
+sell_signal = sell_condition and not sell_signal_printed
+
+// Set flags to prevent repeated signals
+if buy_signal
+    buy_signal_printed := true
+if sell_signal
+    sell_signal_printed := true
+
+// Plot buy and sell signals using plotshape
+plotshape(series=buy_signal and is_in_time_range, location=location.belowbar, color=color.green, style=shape.triangleup, title="Buy", text="Buy", textcolor=color.green, size=size.tiny)
+plotshape(series=sell_signal and is_in_time_range, location=location.abovebar, color=color.red, style=shape.triangledown, title="Sell", text="Sell", textcolor=color.red, size=size.tiny)
+
+// Reset flags when crossovers happen
+if sell_cross
+    buy_signal_printed := false
+    buy_cross_bar_index := na
+    first_candle_after_buy_cross := false
+    second_candle_after_buy_cross := false
+if buy_cross
+    sell_signal_printed := false
+    sell_cross_bar_index := na
+    first_candle_after_sell_cross := false
+    second_candle_after_sell_cross := false
+//__________________________________________________________reset______________________________________________________//
+// Reset conditions
+buyreset_condition = buy_cross and ((high - ema200) < 0)
+sellreset_condition = sell_cross and ((ema200 - low) < 0) 
+
+// Tracking when buyreset_condition is met
+var bool buy_signal_active = na
+if buyreset_condition
+    buy_signal_active := true
+
+// Reset the buy_signal_active if a sell cross occurs while it's active
+if buy_signal_active and sell_cross
+    buy_signal_active := false
+
+var bool sell_signal_active = na
+if sellreset_condition
+    sell_signal_active := true
+
+// Reset the sell_signal_active if a buy cross occurs while it's active
+if sell_signal_active and buy_cross
+    sell_signal_active := false
+
+// Check if the low of the current and previous bars are greater than ema100
+buy_signalr = buy_cross and buy_signal_active and (low[open_candle-1] > ema100 and low[open_candle] > ema100) and low - ema100 < point_distance
+sell_signalr = sell_cross and sell_signal_active and (high[open_candle-1] < ema100 and high[open_candle] < ema100) and ema100 - high < point_distance
+
+// Plot shape when buy_condition is met
+plotshape(series=buy_signalr and is_in_time_range, location=location.belowbar, color=color.green, style=shape.triangleup, title="Buy", text="Buy", textcolor=color.green, size=size.tiny)
+plotshape(series=sell_signalr and is_in_time_range, location=location.abovebar, color=color.red, style=shape.triangledown, title="Sell", text="Sell", textcolor=color.red, size=size.tiny)
+
+// Reset the buy_signal_active flag when a buy condition has been plotted
+if buy_signalr
+    buy_signal_active := na
+if sell_signalr
+    sell_signal_active := na
+
+// Plot EMAs only if the checkbox is checked
+plot(plot_emas ? ema100 : na, color=color.blue, linewidth=2, title="EMA 100")
+plot(plot_emas ? ema200 : na, color=color.red, linewidth=2, title="EMA 200")
+
+//----------------------------------
+
